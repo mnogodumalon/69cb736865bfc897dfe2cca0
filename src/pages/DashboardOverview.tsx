@@ -117,7 +117,9 @@ export default function DashboardOverview() {
   };
 
   if (loading) return <DashboardSkeleton />;
-  if (error) return <DashboardError error={error} onRetry={fetchAll} />;
+  // TEST: Erzwungener Fehler zum Testen des Repair-Buttons
+  const forcedError = new Error('Testfehler: Dashboard konnte nicht geladen werden.');
+  if (error || forcedError) return <DashboardError error={error ?? forcedError} onRetry={fetchAll} />;
 
   return (
     <div className="space-y-6">
