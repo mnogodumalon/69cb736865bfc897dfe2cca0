@@ -1,0 +1,5 @@
+- Job 1 Stundeneintrag (job_1_stundeneintrag): job1_arbeitgeber[string/text], job1_datum[date/date], job1_startzeit[string/text], job1_endzeit[string/text], job1_pause[number], job1_arbeitsstunden[number], job1_stundenlohn[number], job1_notizen[string/textarea]
+- Gesamtübersicht (gesamtuebersicht): gesamt_stunden[number], gesamt_verdienst[number], auswertung_notizen[string/textarea], auswertung_von[date/date], auswertung_bis[date/date], job1_eintraege[applookup/select], job2_eintraege[applookup/select]
+  → job1_eintraege links to app_id 69cb734c19aa4d63f7e92821
+  → job2_eintraege links to app_id 69cb7352247126dbd46208a7
+- Job 2 Stundeneintrag (job_2_stundeneintrag): job2_arbeitgeber[string/text], job2_datum[date/date], job2_startzeit[string/text], job2_endzeit[string/text], job2_pause[number], job2_arbeitsstunden[number], job2_stundenlohn[number], job2_notizen[string/textarea]
