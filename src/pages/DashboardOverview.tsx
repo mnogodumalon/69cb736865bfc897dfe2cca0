@@ -7,18 +7,17 @@ import { formatDate, formatCurrency } from '@/lib/formatters';
 import { useState, useMemo } from 'react';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Button } from '@/components/ui/button';
-import { StatCard } from '@/components/StatCard';
 import { ConfirmDialog } from '@/components/ConfirmDialog';
 import { Job1StundeneintragDialog } from '@/components/dialogs/Job1StundeneintragDialog';
 import { Job2StundeneintragDialog } from '@/components/dialogs/Job2StundeneintragDialog';
 import { AI_PHOTO_SCAN, AI_PHOTO_LOCATION } from '@/config/ai-features';
 import {
   IconAlertCircle, IconTool, IconRefresh, IconCheck,
-  IconPlus, IconPencil, IconTrash, IconClock, IconCurrencyEuro, IconCalendar,
-  IconChevronRight, IconBriefcase, IconChartBar,
+  IconPlus, IconPencil, IconTrash, IconClock, IconCurrencyEuro,
+  IconCalendar, IconBriefcase, IconChartBar,
 } from '@tabler/icons-react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { format, parseISO } from 'date-fns';
+import { format, parseISO, isToday, isThisMonth } from 'date-fns';
 import { de } from 'date-fns/locale';
 
 const APPGROUP_ID = '69cb736865bfc897dfe2cca0';
@@ -53,40 +52,32 @@ export default function DashboardOverview() {
       s + ((r.fields.job1_arbeitsstunden ?? 0) * (r.fields.job1_stundenlohn ?? 0)), 0);
     const j2Earnings = job2Stundeneintrag.reduce((s, r) =>
       s + ((r.fields.job2_arbeitsstunden ?? 0) * (r.fields.job2_stundenlohn ?? 0)), 0);
-    return { j1Hours, j2Hours, j1Earnings, j2Earnings };
+
+    const j1ThisMonth = job1Stundeneintrag
+      .filter(r => r.fields.job1_datum && isThisMonth(parseISO(r.fields.job1_datum)))
+      .reduce((s, r) => s + (r.fields.job1_arbeitsstunden ?? 0), 0);
+    const j2ThisMonth = job2Stundeneintrag
+      .filter(r => r.fields.job2_datum && isThisMonth(parseISO(r.fields.job2_datum)))
+      .reduce((s, r) => s + (r.fields.job2_arbeitsstunden ?? 0), 0);
+
+    return { j1Hours, j2Hours, j1Earnings, j2Earnings, j1ThisMonth, j2ThisMonth };
   }, [job1Stundeneintrag, job2Stundeneintrag]);
 
   const chartData = useMemo(() => {
     const months: Record<string, { monat: string; job1: number; job2: number }> = {};
-
     job1Stundeneintrag.forEach(r => {
       if (!r.fields.job1_datum) return;
-      const monthKey = r.fields.job1_datum.slice(0, 7);
-      if (!months[monthKey]) {
-        months[monthKey] = {
-          monat: format(parseISO(monthKey + '-01'), 'MMM yy', { locale: de }),
-          job1: 0, job2: 0,
-        };
-      }
-      months[monthKey].job1 += r.fields.job1_arbeitsstunden ?? 0;
+      const key = r.fields.job1_datum.slice(0, 7);
+      if (!months[key]) months[key] = { monat: format(parseISO(key + '-01'), 'MMM yy', { locale: de }), job1: 0, job2: 0 };
+      months[key].job1 += r.fields.job1_arbeitsstunden ?? 0;
     });
-
     job2Stundeneintrag.forEach(r => {
       if (!r.fields.job2_datum) return;
-      const monthKey = r.fields.job2_datum.slice(0, 7);
-      if (!months[monthKey]) {
-        months[monthKey] = {
-          monat: format(parseISO(monthKey + '-01'), 'MMM yy', { locale: de }),
-          job1: 0, job2: 0,
-        };
-      }
-      months[monthKey].job2 += r.fields.job2_arbeitsstunden ?? 0;
+      const key = r.fields.job2_datum.slice(0, 7);
+      if (!months[key]) months[key] = { monat: format(parseISO(key + '-01'), 'MMM yy', { locale: de }), job1: 0, job2: 0 };
+      months[key].job2 += r.fields.job2_arbeitsstunden ?? 0;
     });
-
-    return Object.entries(months)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .slice(-6)
-      .map(([, v]) => v);
+    return Object.entries(months).sort(([a], [b]) => a.localeCompare(b)).slice(-6).map(([, v]) => v);
   }, [job1Stundeneintrag, job2Stundeneintrag]);
 
   const allEntries = useMemo<Entry[]>(() => {
@@ -105,6 +96,23 @@ export default function DashboardOverview() {
     return allEntries;
   }, [allEntries, activeFilter]);
 
+  // Group entries by date
+  const groupedEntries = useMemo(() => {
+    const groups: { date: string; label: string; entries: Entry[] }[] = [];
+    const dateMap: Record<string, Entry[]> = {};
+    filteredEntries.forEach(entry => {
+      const d = entry.jobType === 1 ? (entry.data.fields.job1_datum ?? '') : (entry.data.fields.job2_datum ?? '');
+      if (!dateMap[d]) dateMap[d] = [];
+      dateMap[d].push(entry);
+    });
+    Object.keys(dateMap).sort((a, b) => b.localeCompare(a)).forEach(date => {
+      let label = formatDate(date);
+      if (date && isToday(parseISO(date))) label = 'Heute';
+      groups.push({ date, label, entries: dateMap[date] });
+    });
+    return groups;
+  }, [filteredEntries]);
+
   const handleDeleteConfirm = async () => {
     if (!deleteTarget) return;
     if (deleteTarget.job === 1) {
@@ -119,111 +127,106 @@ export default function DashboardOverview() {
   if (loading) return <DashboardSkeleton />;
   if (error) return <DashboardError error={error} onRetry={fetchAll} />;
 
+  const totalHours = stats.j1Hours + stats.j2Hours;
+  const totalEarnings = stats.j1Earnings + stats.j2Earnings;
+
   return (
-    <div className="space-y-6">
-      {/* Intent Workflows */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <a href="#/intents/arbeitstage-erfassen" className="flex items-center gap-4 bg-card border border-border border-l-4 border-l-primary rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow min-w-0">
-          <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-            <IconBriefcase size={20} className="text-primary" />
+    <div className="space-y-5">
+
+      {/* Schnelleingabe */}
+      <div className="grid grid-cols-2 gap-3">
+        <button
+          onClick={() => { setEditJob1(null); setJob1DialogOpen(true); }}
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 p-5 hover:bg-primary/10 hover:border-primary/50 transition-all"
+        >
+          <div className="w-10 h-10 rounded-xl bg-primary flex items-center justify-center">
+            <IconPlus size={20} className="text-primary-foreground" />
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-sm truncate">Arbeitstag erfassen</div>
-            <div className="text-xs text-muted-foreground truncate">Stunden für einen Tag in beiden Jobs eintragen</div>
+          <div className="text-center">
+            <div className="text-sm font-semibold text-foreground">Job 1 erfassen</div>
+            <div className="text-xs text-muted-foreground mt-0.5 hidden sm:block">Stunden eintragen</div>
           </div>
-          <IconChevronRight size={16} className="text-muted-foreground flex-shrink-0" />
-        </a>
-        <a href="#/intents/monatsauswertung-erstellen" className="flex items-center gap-4 bg-card border border-border border-l-4 border-l-primary rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow min-w-0">
-          <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-            <IconChartBar size={20} className="text-primary" />
+        </button>
+        <button
+          onClick={() => { setEditJob2(null); setJob2DialogOpen(true); }}
+          className="flex flex-col items-center justify-center gap-2 rounded-2xl border-2 border-dashed border-orange-400/30 bg-orange-50/50 dark:bg-orange-500/5 p-5 hover:bg-orange-100/50 dark:hover:bg-orange-500/10 hover:border-orange-400/60 transition-all"
+        >
+          <div className="w-10 h-10 rounded-xl bg-orange-500 flex items-center justify-center">
+            <IconPlus size={20} className="text-white" />
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="font-semibold text-sm truncate">Monatsauswertung erstellen</div>
-            <div className="text-xs text-muted-foreground truncate">Einträge eines Zeitraums zur Gesamtübersicht zusammenfassen</div>
+          <div className="text-center">
+            <div className="text-sm font-semibold text-foreground">Job 2 erfassen</div>
+            <div className="text-xs text-muted-foreground mt-0.5 hidden sm:block">Stunden eintragen</div>
           </div>
-          <IconChevronRight size={16} className="text-muted-foreground flex-shrink-0" />
-        </a>
+        </button>
       </div>
-      {/* Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground">Arbeitsstunden</h1>
-          <p className="text-sm text-muted-foreground">{allEntries.length} Einträge gesamt</p>
+
+      {/* KPI Überblick */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {/* Gesamt */}
+        <div className="rounded-2xl border bg-card p-4 flex flex-col gap-1">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium uppercase tracking-wide">
+            <IconClock size={14} />
+            Gesamt
+          </div>
+          <div className="text-2xl font-bold text-foreground mt-1">
+            {totalHours % 1 === 0 ? totalHours.toFixed(0) : totalHours.toFixed(1)} h
+          </div>
+          {totalEarnings > 0 && (
+            <div className="text-sm text-muted-foreground">{formatCurrency(totalEarnings)}</div>
+          )}
+          <div className="text-xs text-muted-foreground">{allEntries.length} Einträge</div>
         </div>
-        <div className="flex gap-2 flex-wrap">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => { setEditJob1(null); setJob1DialogOpen(true); }}
-          >
-            <IconPlus size={14} className="shrink-0 mr-1" />
-            <span>Job 1 erfassen</span>
-          </Button>
-          <Button
-            size="sm"
-            onClick={() => { setEditJob2(null); setJob2DialogOpen(true); }}
-          >
-            <IconPlus size={14} className="shrink-0 mr-1" />
-            <span>Job 2 erfassen</span>
-          </Button>
+
+        {/* Job 1 */}
+        <div className="rounded-2xl border bg-card p-4 flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium uppercase tracking-wide">
+              <IconBriefcase size={14} />
+              Job 1
+            </div>
+            <span className="text-xs rounded-full bg-primary/10 text-primary px-2 py-0.5 font-medium">
+              {stats.j1ThisMonth > 0 ? `${stats.j1ThisMonth.toFixed(1)} h diesen Monat` : `${job1Stundeneintrag.length} Einträge`}
+            </span>
+          </div>
+          <div className="text-2xl font-bold text-foreground mt-1">
+            {stats.j1Hours % 1 === 0 ? stats.j1Hours.toFixed(0) : stats.j1Hours.toFixed(1)} h
+          </div>
+          {stats.j1Earnings > 0 && (
+            <div className="text-sm text-muted-foreground">{formatCurrency(stats.j1Earnings)}</div>
+          )}
+        </div>
+
+        {/* Job 2 */}
+        <div className="rounded-2xl border bg-card p-4 flex flex-col gap-1">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2 text-xs text-muted-foreground font-medium uppercase tracking-wide">
+              <IconBriefcase size={14} />
+              Job 2
+            </div>
+            <span className="text-xs rounded-full bg-orange-500/10 text-orange-600 px-2 py-0.5 font-medium">
+              {stats.j2ThisMonth > 0 ? `${stats.j2ThisMonth.toFixed(1)} h diesen Monat` : `${job2Stundeneintrag.length} Einträge`}
+            </span>
+          </div>
+          <div className="text-2xl font-bold text-foreground mt-1">
+            {stats.j2Hours % 1 === 0 ? stats.j2Hours.toFixed(0) : stats.j2Hours.toFixed(1)} h
+          </div>
+          {stats.j2Earnings > 0 && (
+            <div className="text-sm text-muted-foreground">{formatCurrency(stats.j2Earnings)}</div>
+          )}
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard
-          title="Stunden Job 1"
-          value={`${stats.j1Hours % 1 === 0 ? stats.j1Hours.toFixed(0) : stats.j1Hours.toFixed(1)} h`}
-          description={`${job1Stundeneintrag.length} Einträge`}
-          icon={<IconClock size={18} className="text-muted-foreground" />}
-        />
-        <StatCard
-          title="Stunden Job 2"
-          value={`${stats.j2Hours % 1 === 0 ? stats.j2Hours.toFixed(0) : stats.j2Hours.toFixed(1)} h`}
-          description={`${job2Stundeneintrag.length} Einträge`}
-          icon={<IconClock size={18} className="text-muted-foreground" />}
-        />
-        <StatCard
-          title="Verdienst Job 1"
-          value={stats.j1Earnings > 0 ? formatCurrency(stats.j1Earnings) : '—'}
-          description="Gesamtverdienst"
-          icon={<IconCurrencyEuro size={18} className="text-muted-foreground" />}
-        />
-        <StatCard
-          title="Verdienst Job 2"
-          value={stats.j2Earnings > 0 ? formatCurrency(stats.j2Earnings) : '—'}
-          description="Gesamtverdienst"
-          icon={<IconCurrencyEuro size={18} className="text-muted-foreground" />}
-        />
-      </div>
-
-      {/* Monthly Chart */}
+      {/* Chart */}
       {chartData.length > 0 && (
         <div className="rounded-2xl border bg-card p-4 sm:p-5 overflow-hidden">
           <h2 className="text-sm font-semibold text-foreground mb-4">Stunden pro Monat</h2>
-          <ResponsiveContainer width="100%" height={200}>
+          <ResponsiveContainer width="100%" height={180}>
             <BarChart data={chartData} barGap={4} barCategoryGap="30%">
-              <XAxis
-                dataKey="monat"
-                stroke="var(--muted-foreground)"
-                tick={{ fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-              />
-              <YAxis
-                stroke="var(--muted-foreground)"
-                tick={{ fontSize: 11 }}
-                tickLine={false}
-                axisLine={false}
-                width={32}
-              />
+              <XAxis dataKey="monat" stroke="var(--muted-foreground)" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} />
+              <YAxis stroke="var(--muted-foreground)" tick={{ fontSize: 11 }} tickLine={false} axisLine={false} width={28} />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: 'var(--background)',
-                  border: '1px solid var(--border)',
-                  borderRadius: '8px',
-                  fontSize: 12,
-                }}
+                contentStyle={{ backgroundColor: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: 12 }}
                 formatter={(v: number) => [`${v.toFixed(1)} h`]}
               />
               <Legend iconType="square" iconSize={10} wrapperStyle={{ fontSize: 12 }} />
@@ -234,15 +237,20 @@ export default function DashboardOverview() {
         </div>
       )}
 
-      {/* Timeline */}
+      {/* Eintragliste */}
       <div className="rounded-2xl border bg-card overflow-hidden">
+        {/* Kopfzeile */}
+        <div className="flex items-center justify-between px-4 pt-4 pb-0">
+          <h2 className="text-sm font-semibold text-foreground">Alle Einträge</h2>
+        </div>
+
         {/* Filter Tabs */}
-        <div className="flex border-b px-2 sm:px-4">
+        <div className="flex border-b px-2 mt-2">
           {(['all', 'job1', 'job2'] as const).map(f => (
             <button
               key={f}
               onClick={() => setActiveFilter(f)}
-              className={`px-3 sm:px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
+              className={`px-3 sm:px-4 py-2.5 text-sm font-medium border-b-2 transition-colors ${
                 activeFilter === f
                   ? 'border-primary text-primary'
                   : 'border-transparent text-muted-foreground hover:text-foreground'
@@ -250,177 +258,208 @@ export default function DashboardOverview() {
             >
               {f === 'all' ? 'Alle' : f === 'job1' ? 'Job 1' : 'Job 2'}
               <span className={`ml-1.5 text-xs rounded-full px-1.5 py-0.5 ${
-                activeFilter === f ? 'bg-primary/10' : 'bg-muted'
+                activeFilter === f ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'
               }`}>
-                {f === 'all'
-                  ? allEntries.length
-                  : f === 'job1'
-                  ? job1Stundeneintrag.length
-                  : job2Stundeneintrag.length}
+                {f === 'all' ? allEntries.length : f === 'job1' ? job1Stundeneintrag.length : job2Stundeneintrag.length}
               </span>
             </button>
           ))}
         </div>
 
-        {/* Entry List */}
-        {filteredEntries.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-3 text-center">
-            <IconCalendar size={48} className="text-muted-foreground" stroke={1.5} />
+        {/* Einträge nach Datum gruppiert */}
+        {groupedEntries.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-14 gap-3 text-center">
+            <IconCalendar size={40} className="text-muted-foreground" stroke={1.5} />
             <div>
-              <p className="text-sm font-medium text-foreground">Keine Einträge</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Erstelle deinen ersten Stundeneintrag.</p>
+              <p className="text-sm font-medium text-foreground">Keine Einträge vorhanden</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Erfasse deinen ersten Arbeitstag oben.</p>
             </div>
           </div>
         ) : (
-          <div className="divide-y">
-            {filteredEntries.map(entry => {
-              if (entry.jobType === 1) {
-                const r = entry.data;
-                const hours = r.fields.job1_arbeitsstunden;
-                const earnings = (hours != null && r.fields.job1_stundenlohn != null && r.fields.job1_stundenlohn > 0)
-                  ? hours * r.fields.job1_stundenlohn
-                  : null;
-                return (
-                  <div key={r.record_id} className="flex items-start gap-3 px-4 py-3">
-                    <div className="shrink-0 mt-0.5">
-                      <span className="inline-flex items-center rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary whitespace-nowrap">
-                        Job 1
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="font-medium text-sm truncate">{r.fields.job1_arbeitgeber || '—'}</span>
-                        <span className="text-xs text-muted-foreground">{formatDate(r.fields.job1_datum)}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                        {r.fields.job1_startzeit && r.fields.job1_endzeit && (
-                          <span className="text-xs text-muted-foreground">
-                            {r.fields.job1_startzeit} – {r.fields.job1_endzeit}
-                            {r.fields.job1_pause ? ` (${r.fields.job1_pause} min Pause)` : ''}
-                          </span>
-                        )}
-                        {hours != null && (
-                          <span className="text-xs font-semibold text-foreground">{hours.toFixed(1)} h</span>
-                        )}
-                        {earnings != null && (
-                          <span className="text-xs text-muted-foreground">{formatCurrency(earnings)}</span>
-                        )}
-                      </div>
-                      {r.fields.job1_notizen && (
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{r.fields.job1_notizen}</p>
-                      )}
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => { setEditJob1(r); setJob1DialogOpen(true); }}
-                      >
-                        <IconPencil size={14} />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget({ id: r.record_id, job: 1 })}
-                      >
-                        <IconTrash size={14} />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              } else {
-                const r = entry.data;
-                const hours = r.fields.job2_arbeitsstunden;
-                const earnings = (hours != null && r.fields.job2_stundenlohn != null && r.fields.job2_stundenlohn > 0)
-                  ? hours * r.fields.job2_stundenlohn
-                  : null;
-                return (
-                  <div key={r.record_id} className="flex items-start gap-3 px-4 py-3">
-                    <div className="shrink-0 mt-0.5">
-                      <span className="inline-flex items-center rounded-md bg-orange-500/10 px-2 py-0.5 text-xs font-semibold text-orange-600 whitespace-nowrap">
-                        Job 2
-                      </span>
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
-                        <span className="font-medium text-sm truncate">{r.fields.job2_arbeitgeber || '—'}</span>
-                        <span className="text-xs text-muted-foreground">{formatDate(r.fields.job2_datum)}</span>
-                      </div>
-                      <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
-                        {r.fields.job2_startzeit && r.fields.job2_endzeit && (
-                          <span className="text-xs text-muted-foreground">
-                            {r.fields.job2_startzeit} – {r.fields.job2_endzeit}
-                            {r.fields.job2_pause ? ` (${r.fields.job2_pause} min Pause)` : ''}
-                          </span>
-                        )}
-                        {hours != null && (
-                          <span className="text-xs font-semibold text-foreground">{hours.toFixed(1)} h</span>
-                        )}
-                        {earnings != null && (
-                          <span className="text-xs text-muted-foreground">{formatCurrency(earnings)}</span>
-                        )}
-                      </div>
-                      {r.fields.job2_notizen && (
-                        <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{r.fields.job2_notizen}</p>
-                      )}
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => { setEditJob2(r); setJob2DialogOpen(true); }}
-                      >
-                        <IconPencil size={14} />
-                      </Button>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => setDeleteTarget({ id: r.record_id, job: 2 })}
-                      >
-                        <IconTrash size={14} />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              }
-            })}
+          <div>
+            {groupedEntries.map(({ date, label, entries: dayEntries }) => (
+              <div key={date}>
+                {/* Datums-Trenner */}
+                <div className="flex items-center gap-3 px-4 py-2 bg-muted/30 border-b border-t border-border/50">
+                  <IconCalendar size={13} className="text-muted-foreground shrink-0" />
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</span>
+                  {dayEntries.length > 1 && (
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {dayEntries.reduce((s, e) => {
+                        const h = e.jobType === 1 ? (e.data.fields.job1_arbeitsstunden ?? 0) : (e.data.fields.job2_arbeitsstunden ?? 0);
+                        return s + h;
+                      }, 0).toFixed(1)} h gesamt
+                    </span>
+                  )}
+                </div>
+
+                {/* Einträge des Tages */}
+                <div className="divide-y">
+                  {dayEntries.map(entry => {
+                    if (entry.jobType === 1) {
+                      const r = entry.data;
+                      const hours = r.fields.job1_arbeitsstunden;
+                      const earnings = (hours != null && r.fields.job1_stundenlohn != null && r.fields.job1_stundenlohn > 0)
+                        ? hours * r.fields.job1_stundenlohn : null;
+                      return (
+                        <div key={r.record_id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/20 transition-colors">
+                          <div className="w-1 self-stretch rounded-full bg-primary shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                              <span className="font-medium text-sm">{r.fields.job1_arbeitgeber || 'Job 1'}</span>
+                              <span className="text-xs font-semibold text-primary bg-primary/10 rounded px-1.5 py-0.5">Job 1</span>
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                              {r.fields.job1_startzeit && r.fields.job1_endzeit && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                  <IconClock size={11} />
+                                  {r.fields.job1_startzeit} – {r.fields.job1_endzeit}
+                                  {r.fields.job1_pause ? ` · ${r.fields.job1_pause} min Pause` : ''}
+                                </span>
+                              )}
+                              {hours != null && (
+                                <span className="text-xs font-semibold text-foreground">{hours.toFixed(1)} h</span>
+                              )}
+                              {earnings != null && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                                  <IconCurrencyEuro size={11} />{formatCurrency(earnings)}
+                                </span>
+                              )}
+                            </div>
+                            {r.fields.job1_notizen && (
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{r.fields.job1_notizen}</p>
+                            )}
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button size="icon" variant="ghost" className="h-8 w-8"
+                              onClick={() => { setEditJob1(r); setJob1DialogOpen(true); }}>
+                              <IconPencil size={14} />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => setDeleteTarget({ id: r.record_id, job: 1 })}>
+                              <IconTrash size={14} />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    } else {
+                      const r = entry.data;
+                      const hours = r.fields.job2_arbeitsstunden;
+                      const earnings = (hours != null && r.fields.job2_stundenlohn != null && r.fields.job2_stundenlohn > 0)
+                        ? hours * r.fields.job2_stundenlohn : null;
+                      return (
+                        <div key={r.record_id} className="flex items-center gap-3 px-4 py-3 hover:bg-muted/20 transition-colors">
+                          <div className="w-1 self-stretch rounded-full bg-orange-500 shrink-0" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                              <span className="font-medium text-sm">{r.fields.job2_arbeitgeber || 'Job 2'}</span>
+                              <span className="text-xs font-semibold text-orange-600 bg-orange-500/10 rounded px-1.5 py-0.5">Job 2</span>
+                            </div>
+                            <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-0.5">
+                              {r.fields.job2_startzeit && r.fields.job2_endzeit && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                  <IconClock size={11} />
+                                  {r.fields.job2_startzeit} – {r.fields.job2_endzeit}
+                                  {r.fields.job2_pause ? ` · ${r.fields.job2_pause} min Pause` : ''}
+                                </span>
+                              )}
+                              {hours != null && (
+                                <span className="text-xs font-semibold text-foreground">{hours.toFixed(1)} h</span>
+                              )}
+                              {earnings != null && (
+                                <span className="text-xs text-muted-foreground flex items-center gap-0.5">
+                                  <IconCurrencyEuro size={11} />{formatCurrency(earnings)}
+                                </span>
+                              )}
+                            </div>
+                            {r.fields.job2_notizen && (
+                              <p className="text-xs text-muted-foreground mt-0.5 line-clamp-1">{r.fields.job2_notizen}</p>
+                            )}
+                          </div>
+                          <div className="flex gap-1 shrink-0">
+                            <Button size="icon" variant="ghost" className="h-8 w-8"
+                              onClick={() => { setEditJob2(r); setJob2DialogOpen(true); }}>
+                              <IconPencil size={14} />
+                            </Button>
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => setDeleteTarget({ id: r.record_id, job: 2 })}>
+                              <IconTrash size={14} />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    }
+                  })}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
 
       {/* Auswertungen */}
       {enrichedGesamtuebersicht.length > 0 && (
-        <div className="rounded-2xl border bg-card p-4 sm:p-5 overflow-hidden">
-          <h2 className="text-sm font-semibold text-foreground mb-3">
-            Auswertungen
-            <span className="ml-2 text-xs font-normal text-muted-foreground">{enrichedGesamtuebersicht.length} gespeichert</span>
-          </h2>
-          <div className="space-y-2">
+        <div className="rounded-2xl border bg-card overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b">
+            <div className="flex items-center gap-2">
+              <IconChartBar size={16} className="text-muted-foreground" />
+              <h2 className="text-sm font-semibold text-foreground">Auswertungen</h2>
+            </div>
+            <span className="text-xs text-muted-foreground">{enrichedGesamtuebersicht.length} gespeichert</span>
+          </div>
+          <div className="divide-y">
             {enrichedGesamtuebersicht.slice(0, 5).map(r => (
-              <div key={r.record_id} className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg bg-muted/40 px-3 py-2 text-sm">
+              <div key={r.record_id} className="flex flex-wrap items-center gap-x-6 gap-y-1 px-4 py-3">
                 {r.fields.auswertung_von && r.fields.auswertung_bis && (
-                  <span className="text-xs text-muted-foreground">
-                    {formatDate(r.fields.auswertung_von)} – {formatDate(r.fields.auswertung_bis)}
-                  </span>
+                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground min-w-0">
+                    <IconCalendar size={12} />
+                    <span>{formatDate(r.fields.auswertung_von)} – {formatDate(r.fields.auswertung_bis)}</span>
+                  </div>
                 )}
-                {r.fields.gesamt_stunden != null && (
-                  <span className="text-xs font-semibold text-foreground">{r.fields.gesamt_stunden} h</span>
-                )}
-                {r.fields.gesamt_verdienst != null && (
-                  <span className="text-xs text-muted-foreground">{formatCurrency(r.fields.gesamt_verdienst)}</span>
-                )}
+                <div className="flex gap-4 ml-auto">
+                  {r.fields.gesamt_stunden != null && (
+                    <div className="text-right">
+                      <div className="text-xs font-bold text-foreground">{r.fields.gesamt_stunden} h</div>
+                      <div className="text-xs text-muted-foreground">Stunden</div>
+                    </div>
+                  )}
+                  {r.fields.gesamt_verdienst != null && (
+                    <div className="text-right">
+                      <div className="text-xs font-bold text-foreground">{formatCurrency(r.fields.gesamt_verdienst)}</div>
+                      <div className="text-xs text-muted-foreground">Verdienst</div>
+                    </div>
+                  )}
+                </div>
                 {r.fields.auswertung_notizen && (
-                  <span className="text-xs text-muted-foreground truncate max-w-[200px]">{r.fields.auswertung_notizen}</span>
+                  <p className="text-xs text-muted-foreground w-full truncate">{r.fields.auswertung_notizen}</p>
                 )}
               </div>
             ))}
           </div>
         </div>
       )}
+
+      {/* Intents */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <a href="#/intents/arbeitstage-erfassen" className="flex items-center gap-3 bg-card border border-border rounded-xl p-3.5 shadow-sm hover:shadow-md transition-shadow min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <IconBriefcase size={18} className="text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-sm">Arbeitstag erfassen</div>
+            <div className="text-xs text-muted-foreground truncate">Beide Jobs auf einmal eintragen</div>
+          </div>
+        </a>
+        <a href="#/intents/monatsauswertung-erstellen" className="flex items-center gap-3 bg-card border border-border rounded-xl p-3.5 shadow-sm hover:shadow-md transition-shadow min-w-0">
+          <div className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <IconChartBar size={18} className="text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold text-sm">Monatsauswertung erstellen</div>
+            <div className="text-xs text-muted-foreground truncate">Zeitraum zusammenfassen</div>
+          </div>
+        </a>
+      </div>
 
       {/* Dialogs */}
       <Job1StundeneintragDialog
@@ -468,15 +507,16 @@ export default function DashboardOverview() {
 
 function DashboardSkeleton() {
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <Skeleton className="h-8 w-48" />
-        <Skeleton className="h-9 w-36" />
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3">
+        <Skeleton className="h-24 rounded-2xl" />
+        <Skeleton className="h-24 rounded-2xl" />
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[...Array(4)].map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-24 rounded-2xl" />)}
       </div>
-      <Skeleton className="h-64 rounded-2xl" />
+      <Skeleton className="h-56 rounded-2xl" />
+      <Skeleton className="h-48 rounded-2xl" />
     </div>
   );
 }
@@ -507,11 +547,7 @@ function DashboardError({ error, onRetry }: { error: Error; onRetry: () => void 
         body: JSON.stringify({ appgroup_id: APPGROUP_ID, error_context: errorContext }),
       });
 
-      if (!resp.ok || !resp.body) {
-        setRepairing(false);
-        setRepairFailed(true);
-        return;
-      }
+      if (!resp.ok || !resp.body) { setRepairing(false); setRepairFailed(true); return; }
 
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
@@ -527,16 +563,9 @@ function DashboardError({ error, onRetry }: { error: Error; onRetry: () => void 
           const line = raw.trim();
           if (!line.startsWith('data: ')) continue;
           const content = line.slice(6);
-          if (content.startsWith('[STATUS]')) {
-            setRepairStatus(content.replace(/^\[STATUS]\s*/, ''));
-          }
-          if (content.startsWith('[DONE]')) {
-            setRepairDone(true);
-            setRepairing(false);
-          }
-          if (content.startsWith('[ERROR]') && !content.includes('Dashboard-Links')) {
-            setRepairFailed(true);
-          }
+          if (content.startsWith('[STATUS]')) setRepairStatus(content.replace(/^\[STATUS]\s*/, ''));
+          if (content.startsWith('[DONE]')) { setRepairDone(true); setRepairing(false); }
+          if (content.startsWith('[ERROR]') && !content.includes('Dashboard-Links')) setRepairFailed(true);
         }
       }
     } catch {
@@ -553,7 +582,7 @@ function DashboardError({ error, onRetry }: { error: Error; onRetry: () => void 
         </div>
         <div className="text-center">
           <h3 className="font-semibold text-foreground mb-1">Dashboard repariert</h3>
-          <p className="text-sm text-muted-foreground max-w-xs">Das Problem wurde behoben. Bitte laden Sie die Seite neu.</p>
+          <p className="text-sm text-muted-foreground max-w-xs">Das Problem wurde behoben. Bitte lade die Seite neu.</p>
         </div>
         <Button size="sm" onClick={() => window.location.reload()}>
           <IconRefresh size={14} className="mr-1" />Neu laden
@@ -569,9 +598,7 @@ function DashboardError({ error, onRetry }: { error: Error; onRetry: () => void 
       </div>
       <div className="text-center">
         <h3 className="font-semibold text-foreground mb-1">Fehler beim Laden</h3>
-        <p className="text-sm text-muted-foreground max-w-xs">
-          {repairing ? repairStatus : error.message}
-        </p>
+        <p className="text-sm text-muted-foreground max-w-xs">{repairing ? repairStatus : error.message}</p>
       </div>
       <div className="flex gap-2">
         <Button variant="outline" size="sm" onClick={onRetry} disabled={repairing}>Erneut versuchen</Button>
@@ -582,7 +609,7 @@ function DashboardError({ error, onRetry }: { error: Error; onRetry: () => void 
           {repairing ? 'Reparatur läuft...' : 'Dashboard reparieren'}
         </Button>
       </div>
-      {repairFailed && <p className="text-sm text-destructive">Automatische Reparatur fehlgeschlagen. Bitte kontaktieren Sie den Support.</p>}
+      {repairFailed && <p className="text-sm text-destructive">Automatische Reparatur fehlgeschlagen. Bitte kontaktiere den Support.</p>}
     </div>
   );
 }
