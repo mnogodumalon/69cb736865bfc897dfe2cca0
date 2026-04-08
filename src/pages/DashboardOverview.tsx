@@ -123,6 +123,25 @@ export default function DashboardOverview() {
 
   return (
     <div className="space-y-6">
+      {/* Intent Workflow Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <a href="#/intents/stunden-erfassen" className="bg-card border border-border border-l-4 border-l-primary rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-3 no-underline text-foreground">
+          <IconClock size={22} className="text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold truncate">Stunden erfassen</div>
+            <div className="text-sm text-muted-foreground truncate">Arbeitszeit für Job 1 oder Job 2 eintragen</div>
+          </div>
+          <IconChevronRight size={18} className="text-muted-foreground shrink-0" />
+        </a>
+        <a href="#/intents/auswertung-erstellen" className="bg-card border border-border border-l-4 border-l-primary rounded-xl p-4 shadow-sm hover:shadow-md transition-shadow flex items-center gap-3 no-underline text-foreground">
+          <IconCalendar size={22} className="text-primary shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="font-semibold truncate">Auswertung erstellen</div>
+            <div className="text-sm text-muted-foreground truncate">Monatliche Gesamtübersicht aus Einträgen zusammenstellen</div>
+          </div>
+          <IconChevronRight size={18} className="text-muted-foreground shrink-0" />
+        </a>
+      </div>
       {/* KPI Cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <StatCard
