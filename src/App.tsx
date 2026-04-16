@@ -7,6 +7,8 @@ import AdminPage from '@/pages/AdminPage';
 import Job1StundeneintragPage from '@/pages/Job1StundeneintragPage';
 import GesamtuebersichtPage from '@/pages/GesamtuebersichtPage';
 import Job2StundeneintragPage from '@/pages/Job2StundeneintragPage';
+// <custom:imports>
+// </custom:imports>
 
 export default function App() {
   return (
@@ -20,6 +22,8 @@ export default function App() {
               <Route path="gesamtuebersicht" element={<GesamtuebersichtPage />} />
               <Route path="job-2-stundeneintrag" element={<Job2StundeneintragPage />} />
               <Route path="admin" element={<AdminPage />} />
+              {/* <custom:routes> */}
+              {/* </custom:routes> */}
             </Route>
           </Routes>
         </ActionsProvider>
